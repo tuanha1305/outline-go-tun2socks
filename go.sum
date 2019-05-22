@@ -20,6 +20,7 @@ golang.org/x/image v0.0.0-20190321063152-3fc05d484e9f/go.mod h1:kZ7UVZpmo3dzQBMx
 golang.org/x/mobile v0.0.0-20190312151609-d3739f865fa6/go.mod h1:z+o9i4GpDbdi3rU15maQ/Ox0txvL9dWGYEHz965HBQE=
 golang.org/x/mobile v0.0.0-20190318164015-6bd122906c08 h1:REhdg1qxVTaAJcvh9BOGNgt2kd+KiUZ148XXlLp08FU=
 golang.org/x/mobile v0.0.0-20190318164015-6bd122906c08/go.mod h1:E/iHnbuqvinMTCcRqshq8CkpyQDoeVncDDYHnLhea+o=
+golang.org/x/mobile v0.0.0-20190319155245-9487ef54b94a h1:8OoUs2PBIs/jZZBj7JFoDFS2+rAHfxQlY0RaAS/ZgoA=
 golang.org/x/mobile v0.0.0-20190319155245-9487ef54b94a/go.mod h1:E/iHnbuqvinMTCcRqshq8CkpyQDoeVncDDYHnLhea+o=
 golang.org/x/net v0.0.0-20190311183353-d8887717615a/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
 golang.org/x/net v0.0.0-20190313220215-9f648a60d977 h1:actzWV6iWn3GLqN8dZjzsB+CLt+gaV2+wsxroxiQI8I=
