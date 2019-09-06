@@ -59,6 +59,7 @@ type udpHandler struct {
 	udpConns map[core.UDPConn]*tracker
 	fakedns  net.UDPAddr
 	truedns  net.UDPAddr
+	dns      DNSTransport
 	listener UDPListener
 }
 
@@ -67,12 +68,14 @@ type udpHandler struct {
 // destination is `fakedns`.  Those packets are redirected to `truedns`.
 // Similarly, packets arriving from `truedns` have the source address replaced
 // with `fakedns`.
-func NewUDPHandler(fakedns, truedns net.UDPAddr, timeout time.Duration, listener UDPListener) core.UDPConnHandler {
+// TODO: Remove truedns once DOH is working well
+func NewUDPHandler(fakedns, truedns net.UDPAddr, dns DNSTransport, timeout time.Duration, listener UDPListener) core.UDPConnHandler {
 	return &udpHandler{
 		timeout:  timeout,
 		udpConns: make(map[core.UDPConn]*tracker, 8),
 		fakedns:  fakedns,
 		truedns:  truedns,
+		dns:      dns,
 		listener: listener,
 	}
 }
@@ -147,6 +150,14 @@ func (h *udpHandler) Connect(conn core.UDPConn, target *net.UDPAddr) error {
 	return nil
 }
 
+func (h *udpHandler) doDoh(conn core.UDPConn, data []byte) {
+	resp, err := h.dns.Query(data)
+	if err == nil {
+		conn.WriteFrom(resp, &h.fakedns)
+	}
+	// TODO: Convert HTTP errors into DNS errors.
+}
+
 func (h *udpHandler) ReceiveTo(conn core.UDPConn, data []byte, addr *net.UDPAddr) error {
 	h.Lock()
 	t, ok1 := h.udpConns[conn]
@@ -157,15 +168,21 @@ func (h *udpHandler) ReceiveTo(conn core.UDPConn, data []byte, addr *net.UDPAddr
 	}
 
 	if addr.IP.Equal(h.fakedns.IP) && addr.Port == h.fakedns.Port {
-		// Send the query to the real DNS server.
-		addr = &h.truedns
-		id := queryid(data)
-		if id < 0 {
-			t.complex = true
-		} else if t.upload == 0 {
-			t.queryid = uint16(id)
-		} else if t.queryid != uint16(id) {
-			t.complex = true
+		if h.dns != nil {
+			// Use DOH.
+			dataCopy := append([]byte{}, data...)
+			go h.doDoh(conn, dataCopy)
+		} else {
+			// Send the query to the real DNS server.
+			addr = &h.truedns
+			id := queryid(data)
+			if id < 0 {
+				t.complex = true
+			} else if t.upload == 0 {
+				t.queryid = uint16(id)
+			} else if t.queryid != uint16(id) {
+				t.complex = true
+			}
 		}
 	} else {
 		t.complex = true

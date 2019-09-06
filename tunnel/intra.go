@@ -34,6 +34,7 @@ type intratunnel struct {
 	fakedns          string
 	udpdns           string
 	tcpdns           string
+	dns DNSTransport
 	alwaysSplitHTTPS bool
 	listener         IntraListener
 }
@@ -44,7 +45,8 @@ type intratunnel struct {
 //    This will normally be a reserved or remote IP address, port 53.
 // `udpdns` and `tcpdns` are the actual location of the DNS server in use.
 //    These will normally be localhost with a high-numbered port.
-func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, alwaysSplitHTTPS bool, listener IntraListener) (Tunnel, error) {
+// FIXME: TCPDNS
+func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, alwaysSplitHTTPS bool, dohURL string, dohIPs []string, listener IntraListener) (Tunnel, error) {
 	if tunWriter == nil {
 		return nil, errors.New("Must provide a valid TUN writer")
 	}
@@ -57,6 +59,9 @@ func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, al
 		tcpdns:           tcpdns,
 		alwaysSplitHTTPS: alwaysSplitHTTPS,
 		listener:         listener,
+	}
+	if dohURL != "" {
+		s.dns = NewDoHTransport(dohURL, dohIPs)
 	}
 	if err := s.registerConnectionHandlers(); err != nil {
 		return nil, err
@@ -77,7 +82,7 @@ func (t *intratunnel) registerConnectionHandlers() error {
 	if err != nil {
 		return err
 	}
-	core.RegisterUDPConnHandler(intra.NewUDPHandler(*udpfakedns, *udpdns, timeout, t.listener))
+	core.RegisterUDPConnHandler(intra.NewUDPHandler(*udpfakedns, *udpdns, s.dns, timeout, t.listener))
 
 	tcpfakedns, err := net.ResolveTCPAddr("tcp", t.fakedns)
 	if err != nil {
@@ -87,6 +92,6 @@ func (t *intratunnel) registerConnectionHandlers() error {
 	if err != nil {
 		return err
 	}
-	core.RegisterTCPConnHandler(intra.NewTCPHandler(*tcpfakedns, *tcpdns, t.alwaysSplitHTTPS, t.listener))
+	core.RegisterTCPConnHandler(intra.NewTCPHandler(*tcpfakedns, *tcpdns, s.dns, t.alwaysSplitHTTPS, t.listener))
 	return nil
 }

@@ -28,6 +28,7 @@ import (
 type tcpHandler struct {
 	fakedns          net.TCPAddr
 	truedns          net.TCPAddr
+	dns DNSTransport
 	alwaysSplitHTTPS bool
 	listener         TCPListener
 }
@@ -47,7 +48,7 @@ type TCPListener interface {
 }
 
 type DuplexConn interface {
-	io.ReadWriter
+	net.Conn
 	io.ReaderFrom
 	CloseWrite() error
 	CloseRead() error
@@ -57,10 +58,11 @@ type DuplexConn interface {
 // Currently this class only redirects DNS traffic to a
 // specified server.  (This should be rare for TCP.)
 // All other traffic is forwarded unmodified.
-func NewTCPHandler(fakedns, truedns net.TCPAddr, alwaysSplitHTTPS bool, listener TCPListener) core.TCPConnHandler {
+func NewTCPHandler(fakedns, truedns net.TCPAddr, dns DNSTransport, alwaysSplitHTTPS bool, listener TCPListener) core.TCPConnHandler {
 	return &tcpHandler{
 		fakedns:          fakedns,
 		truedns:          truedns,
+		dns: dns,
 		alwaysSplitHTTPS: alwaysSplitHTTPS,
 		listener:         listener,
 	}
@@ -114,6 +116,10 @@ func filteredPort(addr net.Addr) int16 {
 func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 	// DNS override
 	if target.IP.Equal(h.fakedns.IP) && target.Port == h.fakedns.Port {
+		if h.dns != nil {
+			go h.dns.Accept(conn)
+			return nil
+		}
 		target = &h.truedns
 	}
 	var summary TCPSocketSummary
@@ -125,6 +131,7 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 		if h.alwaysSplitHTTPS {
 			c, err = DialWithSplit(target.Network(), target)
 		} else {
+			// TODO: Use a Context, which is canceled if conn is closed.
 			c, err = DialWithSplitRetry(target.Network(), target, &summary)
 		}
 	} else {
