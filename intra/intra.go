@@ -16,6 +16,7 @@ package tun2socks
 
 import (
 	"runtime/debug"
+	"strings"
 
 	"github.com/Jigsaw-Code/outline-go-tun2socks/tunnel"
 	"github.com/eycorsican/go-tun2socks/common/log"
@@ -41,15 +42,22 @@ type IntraTunnel interface {
 //   The port is normally 53.
 // `udpdns` and `tcpdns` are the location of the actual DNS server being used.  For DNS
 //   tunneling in Intra, these are typically high-numbered ports on localhost.
+// `dohURL` is the URL of a DoH server (no template, POST-only).  If it is nonempty, it
+//   overrides `udpdns` and `tcpdns`.  `dohIPs` is an optional comma-separated list of
+//   IP addresses for the server.
 //
 // Throws an exception if the TUN file descriptor cannot be opened, or if the tunnel fails to
 // connect.
-func ConnectIntraTunnel(fd int, fakedns, udpdns, tcpdns string, alwaysSplitHTTPS bool, listener tunnel.IntraListener) (IntraTunnel, error) {
+func ConnectIntraTunnel(fd int, fakedns, udpdns, tcpdns string, alwaysSplitHTTPS bool, dohURL string, dohIPs string, listener tunnel.IntraListener) (IntraTunnel, error) {
 	tun, err := tunnel.MakeTunFile(fd)
 	if err != nil {
 		return nil, err
 	}
-	t, err := tunnel.NewIntraTunnel(fakedns, udpdns, tcpdns, tun, alwaysSplitHTTPS, listener)
+	ips := []string{}
+	if len(dohIPs) > 0 {
+		ips = strings.Split(dohIPs, ",")
+	}
+	t, err := tunnel.NewIntraTunnel(fakedns, udpdns, tcpdns, tun, alwaysSplitHTTPS, dohURL, ips, listener)
 	if err != nil {
 		return nil, err
 	}

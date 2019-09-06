@@ -27,6 +27,7 @@ import (
 type IntraListener interface {
 	intra.UDPListener
 	intra.TCPListener
+	intra.DNSListener
 }
 
 type intratunnel struct {
@@ -34,7 +35,7 @@ type intratunnel struct {
 	fakedns          string
 	udpdns           string
 	tcpdns           string
-	dns DNSTransport
+	dns intra.DNSTransport
 	alwaysSplitHTTPS bool
 	listener         IntraListener
 }
@@ -61,7 +62,11 @@ func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, al
 		listener:         listener,
 	}
 	if dohURL != "" {
-		s.dns = NewDoHTransport(dohURL, dohIPs)
+		var err error
+		s.dns, err = intra.NewDoHTransport(dohURL, dohIPs, listener)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.registerConnectionHandlers(); err != nil {
 		return nil, err
@@ -82,7 +87,7 @@ func (t *intratunnel) registerConnectionHandlers() error {
 	if err != nil {
 		return err
 	}
-	core.RegisterUDPConnHandler(intra.NewUDPHandler(*udpfakedns, *udpdns, s.dns, timeout, t.listener))
+	core.RegisterUDPConnHandler(intra.NewUDPHandler(*udpfakedns, *udpdns, t.dns, timeout, t.listener))
 
 	tcpfakedns, err := net.ResolveTCPAddr("tcp", t.fakedns)
 	if err != nil {
@@ -92,6 +97,6 @@ func (t *intratunnel) registerConnectionHandlers() error {
 	if err != nil {
 		return err
 	}
-	core.RegisterTCPConnHandler(intra.NewTCPHandler(*tcpfakedns, *tcpdns, s.dns, t.alwaysSplitHTTPS, t.listener))
+	core.RegisterTCPConnHandler(intra.NewTCPHandler(*tcpfakedns, *tcpdns, t.dns, t.alwaysSplitHTTPS, t.listener))
 	return nil
 }
