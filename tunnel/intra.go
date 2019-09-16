@@ -30,14 +30,17 @@ type IntraListener interface {
 	intra.DNSListener
 }
 
+type IntraTunnel interface {
+	Tunnel
+	SetDNS(intra.DNSTransport)
+	GetDNS() intra.DNSTransport
+}
+
 type intratunnel struct {
 	*tunnel
-	fakedns          string
-	udpdns           string
-	tcpdns           string
+	tcp intra.TCPHandler
+	udp intra.UDPHandler
 	dns intra.DNSTransport
-	alwaysSplitHTTPS bool
-	listener         IntraListener
 }
 
 // NewIntraTunnel creates a connected Intra session.
@@ -47,56 +50,57 @@ type intratunnel struct {
 // `udpdns` and `tcpdns` are the actual location of the DNS server in use.
 //    These will normally be localhost with a high-numbered port.
 // FIXME: TCPDNS
-func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, alwaysSplitHTTPS bool, dohURL string, dohIPs []string, listener IntraListener) (Tunnel, error) {
+func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, alwaysSplitHTTPS bool, listener IntraListener) (IntraTunnel, error) {
 	if tunWriter == nil {
 		return nil, errors.New("Must provide a valid TUN writer")
 	}
 	core.RegisterOutputFn(tunWriter.Write)
 	base := &tunnel{tunWriter, core.NewLWIPStack(), true}
 	s := &intratunnel{
-		tunnel:           base,
-		fakedns:          fakedns,
-		udpdns:           udpdns,
-		tcpdns:           tcpdns,
-		alwaysSplitHTTPS: alwaysSplitHTTPS,
-		listener:         listener,
+		tunnel: base,
 	}
-	if dohURL != "" {
-		var err error
-		s.dns, err = intra.NewDoHTransport(dohURL, dohIPs, listener)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := s.registerConnectionHandlers(); err != nil {
+	err := s.registerConnectionHandlers(fakedns, udpdns, tcpdns, alwaysSplitHTTPS, listener)
+	if err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
 // Registers Intra's custom UDP and TCP connection handlers to the tun2socks core.
-func (t *intratunnel) registerConnectionHandlers() error {
+func (t *intratunnel) registerConnectionHandlers(fakedns, udpdns, tcpdns string, alwaysSplitHTTPS bool, listener IntraListener) error {
 	// RFC 5382 REQ-5 requires a timeout no shorter than 2 hours and 4 minutes.
 	timeout, _ := time.ParseDuration("2h4m")
 
-	udpfakedns, err := net.ResolveUDPAddr("udp", t.fakedns)
+	udpfakedns, err := net.ResolveUDPAddr("udp", fakedns)
 	if err != nil {
 		return err
 	}
-	udpdns, err := net.ResolveUDPAddr("udp", t.udpdns)
+	udptruedns, err := net.ResolveUDPAddr("udp", udpdns)
 	if err != nil {
 		return err
 	}
-	core.RegisterUDPConnHandler(intra.NewUDPHandler(*udpfakedns, *udpdns, t.dns, timeout, t.listener))
+	t.udp = intra.NewUDPHandler(*udpfakedns, *udptruedns, timeout, listener)
+	core.RegisterUDPConnHandler(t.udp)
 
-	tcpfakedns, err := net.ResolveTCPAddr("tcp", t.fakedns)
+	tcpfakedns, err := net.ResolveTCPAddr("tcp", fakedns)
 	if err != nil {
 		return err
 	}
-	tcpdns, err := net.ResolveTCPAddr("tcp", t.tcpdns)
+	tcptruedns, err := net.ResolveTCPAddr("tcp", tcpdns)
 	if err != nil {
 		return err
 	}
-	core.RegisterTCPConnHandler(intra.NewTCPHandler(*tcpfakedns, *tcpdns, t.dns, t.alwaysSplitHTTPS, t.listener))
+	t.tcp = intra.NewTCPHandler(*tcpfakedns, *tcptruedns, alwaysSplitHTTPS, listener)
+	core.RegisterTCPConnHandler(t.tcp)
 	return nil
+}
+
+func (t *intratunnel) SetDNS(dns intra.DNSTransport) {
+	t.dns = dns
+	t.udp.SetDNS(dns)
+	t.tcp.SetDNS(dns)
+}
+
+func (t *intratunnel) GetDNS() intra.DNSTransport {
+	return t.dns
 }

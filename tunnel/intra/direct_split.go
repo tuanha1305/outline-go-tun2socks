@@ -20,11 +20,7 @@ func DialWithSplit(network string, addr *net.TCPAddr) (DuplexConn, error) {
 		return nil, err
 	}
 
-	r := &retrier{
-		conn: conn,
-	}
-
-	return r, nil
+	return &splitter{conn: conn}, nil
 }
 
 // Read-related functions.
@@ -72,4 +68,8 @@ func (s *splitter) ReadFrom(reader io.Reader) (bytes int64, err error) {
 
 func (s *splitter) CloseWrite() error {
 	return s.conn.CloseWrite()
+}
+
+func (s *splitter) Close() error {
+	return s.conn.Close()
 }

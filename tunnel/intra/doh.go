@@ -1,4 +1,5 @@
 package intra
+
 // TODO: Split doh and retrier into their own packages.
 
 import (
@@ -18,23 +19,23 @@ import (
 )
 
 const (
-	Complete = iota // Transaction completed successfully
-	SendFailed // Failed to send query
-	HTTPError // Got a non-200 HTTP status
+	Complete   = iota // Transaction completed successfully
+	SendFailed        // Failed to send query
+	HTTPError         // Got a non-200 HTTP status
 	BadQuery
-	BadResponse // Response was invalid
+	BadResponse   // Response was invalid
 	InternalError // Logic error
-	Canceled // Request was canceled
+	Canceled      // Request was canceled
 )
 
 // Summary of a DNS transaction, reported when it is complete.
 type DNSSummary struct {
-	Timestamp int64 // Seconds since the epoch at time of query
-	Latency float64 // Response latency in seconds
-	Query   []byte
-	Response []byte
-	Server     string
-	Status int
+	Timestamp int64   // Seconds since the epoch at time of query
+	Latency   float64 // Response latency in seconds
+	Query     []byte
+	Response  []byte
+	Server    string
+	Status    int
 }
 
 type DNSListener interface {
@@ -46,18 +47,16 @@ type DNSTransport interface {
 	// Given a DNS query (including ID), returns a DNS response with matching
 	// ID, or an error if no response was received.
 	Query(q []byte) ([]byte, error)
-	// Accept multiple queries in DNS-over-TCP format on a net.Conn, and
-	// reply in kind.
-	Accept(c io.ReadWriteCloser)
+	GetURL() string
 }
 
 type transport struct {
 	DNSTransport
-	url    string
-	port   int
-	addrs  []net.IP // Server addresses in preference order
-	mu     sync.RWMutex // Lock protecting addrs
-	client http.Client
+	url      string
+	port     int
+	addrs    []net.IP     // Server addresses in preference order
+	mu       sync.RWMutex // Lock protecting addrs
+	client   http.Client
 	listener DNSListener
 }
 
@@ -161,18 +160,17 @@ func (t *transport) doQuery(q []byte) (response []byte, status int, server strin
 
 	// If GotConn is called, it will always be before the request completes or fails,
 	// and therefore before this function returns.
-    trace := httptrace.ClientTrace{
-        GotConn: func(info httptrace.GotConnInfo) {
+	trace := httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
 			if info.Conn == nil {
 				return
 			}
 			if addr := info.Conn.RemoteAddr(); addr != nil {
 				server, _, _ = net.SplitHostPort(addr.String())
 			}
-        },
-    }
-    req = req.WithContext(httptrace.WithClientTrace(req.Context(), &trace))
-
+		},
+	}
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &trace))
 
 	const mimetype = "application/dns-message"
 	req.Header.Set("Content-Type", mimetype)
@@ -205,17 +203,21 @@ func (t *transport) Query(q []byte) ([]byte, error) {
 		latency := responseTime.Sub(queryTime)
 		t.listener.OnDNSTransaction(&DNSSummary{
 			Timestamp: queryTime.Unix(),
-			Latency: latency.Seconds(),
-			Query: q,
-			Response: response,
-			Server: server,
-			Status: status,
+			Latency:   latency.Seconds(),
+			Query:     q,
+			Response:  response,
+			Server:    server,
+			Status:    status,
 		})
 	}
 	return response, err
 }
 
-func (t *transport) forwardQuery(q []byte, c io.ReadWriteCloser) {
+func (t *transport) GetURL() string {
+	return t.url
+}
+
+func forwardQuery(t DNSTransport, q []byte, c io.ReadWriteCloser) {
 	resp, err := t.Query(q)
 	if err != nil {
 		// Query error.  Close the socket.
@@ -234,13 +236,13 @@ func (t *transport) forwardQuery(q []byte, c io.ReadWriteCloser) {
 	// TCP segment, for efficiency.
 	var combined net.Buffers = [][]byte{rlbuf, resp}
 	n, err := combined.WriteTo(c)
-	if err != nil || int(n) != rlen + 2 {
+	if err != nil || int(n) != rlen+2 {
 		// Failed or partial write.  Close the socket.
 		c.Close()
 	}
 }
 
-func (t *transport) Accept(c io.ReadWriteCloser) {
+func Accept(t DNSTransport, c io.ReadWriteCloser) {
 	defer c.Close()
 	qlbuf := make([]byte, 2)
 	for n, err := c.Read(qlbuf); err == nil && n == 2; n, err = c.Read(qlbuf) {
@@ -250,6 +252,6 @@ func (t *transport) Accept(c io.ReadWriteCloser) {
 		if uint16(n) != qlen || err != nil {
 			return
 		}
-		go t.forwardQuery(q, c)
+		go forwardQuery(t, q, c)
 	}
 }

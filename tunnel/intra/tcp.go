@@ -25,10 +25,16 @@ import (
 	"github.com/eycorsican/go-tun2socks/core"
 )
 
+type TCPHandler interface {
+	core.TCPConnHandler
+	SetDNS(DNSTransport)
+}
+
 type tcpHandler struct {
+	TCPHandler
 	fakedns          net.TCPAddr
 	truedns          net.TCPAddr
-	dns DNSTransport
+	dns              DNSTransport
 	alwaysSplitHTTPS bool
 	listener         TCPListener
 }
@@ -58,11 +64,10 @@ type DuplexConn interface {
 // Currently this class only redirects DNS traffic to a
 // specified server.  (This should be rare for TCP.)
 // All other traffic is forwarded unmodified.
-func NewTCPHandler(fakedns, truedns net.TCPAddr, dns DNSTransport, alwaysSplitHTTPS bool, listener TCPListener) core.TCPConnHandler {
+func NewTCPHandler(fakedns, truedns net.TCPAddr, alwaysSplitHTTPS bool, listener TCPListener) TCPHandler {
 	return &tcpHandler{
 		fakedns:          fakedns,
 		truedns:          truedns,
-		dns: dns,
 		alwaysSplitHTTPS: alwaysSplitHTTPS,
 		listener:         listener,
 	}
@@ -117,7 +122,7 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 	// DNS override
 	if target.IP.Equal(h.fakedns.IP) && target.Port == h.fakedns.Port {
 		if h.dns != nil {
-			go h.dns.Accept(conn)
+			go Accept(h.dns, conn)
 			return nil
 		}
 		target = &h.truedns
@@ -144,4 +149,8 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 	go h.forward(conn, c, &summary)
 	log.Infof("new proxy connection for target: %s:%s", target.Network(), target.String())
 	return nil
+}
+
+func (h *tcpHandler) SetDNS(dns DNSTransport) {
+	h.dns = dns
 }

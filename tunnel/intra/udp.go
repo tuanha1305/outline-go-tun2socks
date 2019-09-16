@@ -52,7 +52,13 @@ func makeTracker(conn *net.UDPConn) *tracker {
 	return &tracker{conn, time.Now(), 0, 0, false, 0}
 }
 
+type UDPHandler interface {
+	core.UDPConnHandler
+	SetDNS(dns DNSTransport)
+}
+
 type udpHandler struct {
+	UDPHandler
 	sync.Mutex
 
 	timeout  time.Duration
@@ -69,13 +75,12 @@ type udpHandler struct {
 // Similarly, packets arriving from `truedns` have the source address replaced
 // with `fakedns`.
 // TODO: Remove truedns once DOH is working well
-func NewUDPHandler(fakedns, truedns net.UDPAddr, dns DNSTransport, timeout time.Duration, listener UDPListener) core.UDPConnHandler {
+func NewUDPHandler(fakedns, truedns net.UDPAddr, timeout time.Duration, listener UDPListener) UDPHandler {
 	return &udpHandler{
 		timeout:  timeout,
 		udpConns: make(map[core.UDPConn]*tracker, 8),
 		fakedns:  fakedns,
 		truedns:  truedns,
-		dns:      dns,
 		listener: listener,
 	}
 }
@@ -208,4 +213,8 @@ func (h *udpHandler) Close(conn core.UDPConn) {
 		h.listener.OnUDPSocketClosed(&UDPSocketSummary{t.upload, t.download, duration})
 		delete(h.udpConns, conn)
 	}
+}
+
+func (h *udpHandler) SetDNS(dns DNSTransport) {
+	h.dns = dns
 }
