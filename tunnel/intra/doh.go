@@ -221,6 +221,8 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 	q[0], q[1] = id0, id1
 	if len(response) >= 2 {
 		response[0], response[1] = id0, id1
+	} else {
+		qerr = &queryError{BadResponse, fmt.Errorf("Response length is %d", len(response))}
 	}
 	return
 }
