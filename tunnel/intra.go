@@ -24,16 +24,20 @@ import (
 	"github.com/eycorsican/go-tun2socks/core"
 )
 
+// IntraListener receives usage statistics when a UDP or TCP socket is closed.
 type IntraListener interface {
 	intra.UDPListener
 	intra.TCPListener
-	intra.DNSListener
 }
 
+// IntraTunnel represents an Intra session.
 type IntraTunnel interface {
 	Tunnel
-	SetDNS(intra.DNSTransport)
+	// Get and set the DNSTransport (default: nil).  If the DNSTransport is non-nil,
+	// the tunnel will send DNS queries to this transport instead of forwarding them to
+	// `udpdns`/`tcpdns`.  The transport can be changed at any time during operation.
 	GetDNS() intra.DNSTransport
+	SetDNS(intra.DNSTransport)
 }
 
 type intratunnel struct {
@@ -49,7 +53,7 @@ type intratunnel struct {
 //    This will normally be a reserved or remote IP address, port 53.
 // `udpdns` and `tcpdns` are the actual location of the DNS server in use.
 //    These will normally be localhost with a high-numbered port.
-// FIXME: TCPDNS
+// TODO: Remove `udpdns` and `tcpdns` once DNSTransport is fully rolled out.
 func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, alwaysSplitHTTPS bool, listener IntraListener) (IntraTunnel, error) {
 	if tunWriter == nil {
 		return nil, errors.New("Must provide a valid TUN writer")
