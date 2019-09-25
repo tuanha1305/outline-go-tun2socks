@@ -61,53 +61,50 @@ type DNSTransport interface {
 type transport struct {
 	DNSTransport
 	url      string
-	domain string
 	port     int
-	ips      []net.IP // Server addresses in preference order
+	ips      ipMap
 	client   http.Client
 	listener DNSListener
 }
 
 func (t *transport) dial(network, addr string) (net.Conn, error) {
-	domain, _, _ := net.SplitHostPort(addr)
-	if t.domain != domain {
-		// Dialing a host other than the one specified in the URL.  This can happen if
-		// the DoH server replies with a redirect.
-		tcpaddr, err := net.ResolveTCPAddr(network, addr)
-		if err != nil {
-			return nil, err
-		}
-		return DialWithSplitRetry(network, tcpaddr, nil)
+	fmt.Printf("Dialing %s", addr)
+	domain, portstr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	portnum, err := strconv.Atoi(portstr)
+	if err != nil {
+		return nil, err
 	}
 
-	// TODO: Improve IP fallback strategy with preference learning, parallelism and
-	// Happy Eyeballs.
-	var err error
+	wrap := func(ip net.IP) *net.TCPAddr {
+		return &net.TCPAddr{IP: ip, Port: portnum}
+	}
+
+	// TODO: Improve IP fallback strategy with parallelism and Happy Eyeballs.
 	var conn net.Conn
-	for _, ip := range t.ips {
-		tcpaddr := &net.TCPAddr{IP: ip, Port: t.port}
-		if conn, err = DialWithSplitRetry(network, tcpaddr, nil); err == nil {
+	ips := t.ips.get(domain)
+	confirmed := ips.getConfirmed()
+	if confirmed != nil {
+		fmt.Println("Trying confirmed IP")
+		if conn, err = DialWithSplitRetry(network, wrap(confirmed), nil); err == nil {
+			return conn, nil
+		}
+		ips.disconfirm(confirmed)
+	}
+
+	fmt.Println("Trying all IPs")
+	for _, ip := range ips.getAll() {
+		if ip.Equal(confirmed) {
+			// Don't try this IP twice.
+			continue
+		}
+		if conn, err = DialWithSplitRetry(network, wrap(ip), nil); err == nil {
 			return conn, nil
 		}
 	}
 	return nil, err
-}
-
-// Append any new IPs from src onto dest.
-func add(dest, src []net.IP) []net.IP {
-	for _, new := range src {
-		found := false
-		for _, old := range dest {
-			if old.Equal(new) {
-				found = true
-				break	
-			}
-		}
-		if !found {
-			dest = append(dest, new)
-		}
-	}
-	return dest
 }
 
 // NewDoHTransport returns a DoH DNSTransport, ready for use.
@@ -135,17 +132,14 @@ func NewDoHTransport(rawurl string, addrs []string, listener DNSListener) (DNSTr
 	}
 	t := &transport{
 		url:      rawurl,
-		domain: parsedurl.Hostname(),
 		port:     port,
 		listener: listener,
 	}
-	// Set t.ips to the hostname's addresses first, followed by the fallback addresses.
-	t.ips, _ = net.LookupIP(parsedurl.Hostname())
+	ips := t.ips.get(parsedurl.Hostname())
 	for _, addr := range addrs {
-		ips, _ := net.LookupIP(addr)
-		t.ips = add(t.ips, ips)
+		ips.add(addr)
 	}
-	if len(t.ips) == 0 {
+	if ips.empty() {
 		return nil, fmt.Errorf("No IP addresses for %s", parsedurl.Hostname())
 	}
 
@@ -211,12 +205,13 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 		qerr = &queryError{SendFailed, err}
 		return
 	}
-	if httpResponse.StatusCode != 200 {
+	if httpResponse.StatusCode != http.StatusOK {
 		err := fmt.Errorf("HTTP request failed: %d", httpResponse.StatusCode)
 		qerr = &queryError{HTTPError, err}
 		return
 	}
 	response, err = ioutil.ReadAll(httpResponse.Body)
+	httpResponse.Body.Close()
 	// Restore the query ID.
 	q[0], q[1] = id0, id1
 	if len(response) >= 2 {
@@ -224,6 +219,8 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 	} else {
 		qerr = &queryError{BadResponse, fmt.Errorf("Response length is %d", len(response))}
 	}
+	// Record a working IP address for this server
+	t.ips.get(httpResponse.Request.URL.Hostname()).confirm(server)
 	return
 }
 
