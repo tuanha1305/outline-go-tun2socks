@@ -69,6 +69,9 @@ type transport struct {
 	listener DNSListener
 }
 
+// Wait up to three seconds for the TCP handshake to complete.
+const tcpTimeout time.Duration = 3e9
+
 func (t *transport) dial(network, addr string) (net.Conn, error) {
 	fmt.Printf("Dialing %s\n", addr)
 	domain, portstr, err := net.SplitHostPort(addr)
@@ -90,7 +93,7 @@ func (t *transport) dial(network, addr string) (net.Conn, error) {
 	confirmed := ips.Confirmed()
 	if confirmed != nil {
 		fmt.Printf("Trying confirmed IP %s for addr %s\n", confirmed.String(), addr)
-		if conn, err = DialWithSplitRetry(network, wrap(confirmed), nil); err == nil {
+		if conn, err = DialWithSplitRetry(wrap(confirmed), tcpTimeout, nil); err == nil {
 			fmt.Printf("Confirmed IP %s worked\n", confirmed.String())
 			return conn, nil
 		}
@@ -104,7 +107,7 @@ func (t *transport) dial(network, addr string) (net.Conn, error) {
 			// Don't try this IP twice.
 			continue
 		}
-		if conn, err = DialWithSplitRetry(network, wrap(ip), nil); err == nil {
+		if conn, err = DialWithSplitRetry(wrap(ip), tcpTimeout, nil); err == nil {
 			return conn, nil
 		}
 	}
