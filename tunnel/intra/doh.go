@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/Jigsaw-Code/outline-go-tun2socks/tunnel/intra/ipmap"
 )
 
 const (
@@ -62,13 +64,13 @@ type transport struct {
 	DNSTransport
 	url      string
 	port     int
-	ips      ipMap
+	ips      ipmap.IPMap
 	client   http.Client
 	listener DNSListener
 }
 
 func (t *transport) dial(network, addr string) (net.Conn, error) {
-	fmt.Printf("Dialing %s", addr)
+	fmt.Printf("Dialing %s\n", addr)
 	domain, portstr, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -84,18 +86,20 @@ func (t *transport) dial(network, addr string) (net.Conn, error) {
 
 	// TODO: Improve IP fallback strategy with parallelism and Happy Eyeballs.
 	var conn net.Conn
-	ips := t.ips.get(domain)
-	confirmed := ips.getConfirmed()
+	ips := t.ips.Get(domain)
+	confirmed := ips.Confirmed()
 	if confirmed != nil {
-		fmt.Println("Trying confirmed IP")
+		fmt.Printf("Trying confirmed IP %s for addr %s\n", confirmed.String(), addr)
 		if conn, err = DialWithSplitRetry(network, wrap(confirmed), nil); err == nil {
+			fmt.Printf("Confirmed IP %s worked\n", confirmed.String())
 			return conn, nil
 		}
-		ips.disconfirm(confirmed)
+		fmt.Printf("Confirmed IP %s failed with err %v\n", confirmed.String(), err)
+		ips.Disconfirm(confirmed)
 	}
 
 	fmt.Println("Trying all IPs")
-	for _, ip := range ips.getAll() {
+	for _, ip := range ips.GetAll() {
 		if ip.Equal(confirmed) {
 			// Don't try this IP twice.
 			continue
@@ -134,12 +138,13 @@ func NewDoHTransport(rawurl string, addrs []string, listener DNSListener) (DNSTr
 		url:      rawurl,
 		port:     port,
 		listener: listener,
+		ips:      ipmap.NewIPMap(),
 	}
-	ips := t.ips.get(parsedurl.Hostname())
+	ips := t.ips.Get(parsedurl.Hostname())
 	for _, addr := range addrs {
-		ips.add(addr)
+		ips.Add(addr)
 	}
-	if ips.empty() {
+	if ips.Empty() {
 		return nil, fmt.Errorf("No IP addresses for %s", parsedurl.Hostname())
 	}
 
@@ -189,6 +194,9 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 	// and therefore before this function returns.
 	trace := httptrace.ClientTrace{
 		GotConn: func(info httptrace.GotConnInfo) {
+			if info.Conn == nil {
+				return
+			}
 			if addr := info.Conn.RemoteAddr(); addr != nil {
 				server, _, _ = net.SplitHostPort(addr.String())
 			}
@@ -212,15 +220,20 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 	}
 	response, err = ioutil.ReadAll(httpResponse.Body)
 	httpResponse.Body.Close()
+	if err != nil {
+		qerr = &queryError{BadResponse, err}
+		return
+	}
 	// Restore the query ID.
 	q[0], q[1] = id0, id1
 	if len(response) >= 2 {
 		response[0], response[1] = id0, id1
 	} else {
 		qerr = &queryError{BadResponse, fmt.Errorf("Response length is %d", len(response))}
+		return
 	}
 	// Record a working IP address for this server
-	t.ips.get(httpResponse.Request.URL.Hostname()).confirm(server)
+	t.ips.Get(httpResponse.Request.URL.Hostname()).Confirm(server)
 	return
 }
 

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"testing"
 )
 
@@ -18,6 +19,11 @@ var ips = []string{
 	"8.8.4.4",
 	"2001:4860:4860::8888",
 	"2001:4860:4860::8844",
+}
+var parsedURL *url.URL
+
+func init() {
+	parsedURL, _ = url.Parse(testURL)
 }
 
 // Check that the constructor works.
@@ -105,7 +111,7 @@ type testRoundTripper struct {
 
 func makeTestRoundTripper() *testRoundTripper {
 	return &testRoundTripper{
-		req: make(chan *http.Request),
+		req:  make(chan *http.Request),
 		resp: make(chan *http.Response),
 	}
 }
@@ -158,7 +164,8 @@ func TestResponse(t *testing.T) {
 		r, w := io.Pipe()
 		rt.resp <- &http.Response{
 			StatusCode: 200,
-			Body: r,
+			Body:       r,
+			Request:    &http.Request{URL: parsedURL},
 		}
 		w.Write([]byte{0, 0, 8, 9, 10})
 		w.Close()
@@ -188,7 +195,8 @@ func TestEmptyResponse(t *testing.T) {
 		w.Close()
 		rt.resp <- &http.Response{
 			StatusCode: 200,
-			Body: r,
+			Body:       r,
+			Request:    &http.Request{URL: parsedURL},
 		}
 	}()
 
@@ -215,7 +223,8 @@ func TestHTTPError(t *testing.T) {
 		r, w := io.Pipe()
 		rt.resp <- &http.Response{
 			StatusCode: 500,
-			Body: r,
+			Body:       r,
+			Request:    &http.Request{URL: parsedURL},
 		}
 		w.Write([]byte{0, 0, 8, 9, 10})
 		w.Close()
@@ -297,7 +306,8 @@ func TestListener(t *testing.T) {
 		r, w := io.Pipe()
 		rt.resp <- &http.Response{
 			StatusCode: 200,
-			Body: r,
+			Body:       r,
+			Request:    &http.Request{URL: parsedURL},
 		}
 		w.Write([]byte{0, 0, 8, 9, 10})
 		w.Close()

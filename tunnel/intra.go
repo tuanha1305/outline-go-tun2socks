@@ -28,6 +28,7 @@ import (
 type IntraListener interface {
 	intra.UDPListener
 	intra.TCPListener
+	intra.DNSListener
 }
 
 // IntraTunnel represents an Intra session.
