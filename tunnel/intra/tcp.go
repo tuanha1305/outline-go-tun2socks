@@ -19,6 +19,7 @@ package intra
 import (
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/eycorsican/go-tun2socks/common/log"
@@ -34,7 +35,7 @@ type tcpHandler struct {
 	TCPHandler
 	fakedns          net.TCPAddr
 	truedns          net.TCPAddr
-	dns              DNSTransport
+	dns              atomic.Value
 	alwaysSplitHTTPS bool
 	listener         TCPListener
 }
@@ -121,8 +122,9 @@ func filteredPort(addr net.Addr) int16 {
 func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 	// DNS override
 	if target.IP.Equal(h.fakedns.IP) && target.Port == h.fakedns.Port {
-		if h.dns != nil {
-			go Accept(h.dns, conn)
+		dns := h.getDNS()
+		if dns != nil {
+			go Accept(dns, conn)
 			return nil
 		}
 		target = &h.truedns
@@ -152,5 +154,9 @@ func (h *tcpHandler) Handle(conn net.Conn, target *net.TCPAddr) error {
 }
 
 func (h *tcpHandler) SetDNS(dns DNSTransport) {
-	h.dns = dns
+	h.dns.Store(dns)
+}
+
+func (h *tcpHandler) getDNS() DNSTransport {
+	return h.dns.Load().(DNSTransport)
 }

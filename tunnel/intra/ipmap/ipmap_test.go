@@ -102,6 +102,21 @@ func TestConfirmed(t *testing.T) {
 	}
 }
 
+func TestConfirmNew(t *testing.T) {
+	m := NewIPMap()
+	s := m.Get("example")
+	s.Add("192.0.2.1")
+	// Confirm a new address.
+	s.Confirm("192.0.2.2")
+	if s.Confirmed() == nil || s.Confirmed().String() != "192.0.2.2" {
+		t.Error("Confirmation failed")
+	}
+	ips := s.GetAll()
+	if len(ips) != 2 {
+		t.Error("New address not added to the set")
+	}
+}
+
 func TestDisconfirmMismatch(t *testing.T) {
 	m := NewIPMap()
 	s := m.Get("www.google.com")

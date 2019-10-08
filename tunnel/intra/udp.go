@@ -17,6 +17,7 @@
 package intra
 
 import (
+	"sync/atomic"
 	"errors"
 	"fmt"
 	"net"
@@ -65,7 +66,7 @@ type udpHandler struct {
 	udpConns map[core.UDPConn]*tracker
 	fakedns  net.UDPAddr
 	truedns  net.UDPAddr
-	dns      DNSTransport
+	dns      atomic.Value
 	listener UDPListener
 }
 
@@ -155,8 +156,8 @@ func (h *udpHandler) Connect(conn core.UDPConn, target *net.UDPAddr) error {
 	return nil
 }
 
-func (h *udpHandler) doDoh(t *tracker, conn core.UDPConn, data []byte) {
-	resp, err := h.dns.Query(data)
+func (h *udpHandler) doDoh(dns DNSTransport, t *tracker, conn core.UDPConn, data []byte) {
+	resp, err := dns.Query(data)
 	if err == nil {
 		conn.WriteFrom(resp, &h.fakedns)
 	}
@@ -192,11 +193,12 @@ func (h *udpHandler) ReceiveTo(conn core.UDPConn, data []byte, addr *net.UDPAddr
 			// Ignore the retry to avoid making redundant DoH queries.
 			return nil
 		}
-		if h.dns != nil {
+		dns := h.getDNS()
+		if dns != nil {
 			// Use DOH.
 			t.upload += int64(len(data))
 			dataCopy := append([]byte{}, data...)
-			go h.doDoh(t, conn, dataCopy)
+			go h.doDoh(dns, t, conn, dataCopy)
 			return nil
 		}
 		// Send the query to the real DNS server.
@@ -228,5 +230,9 @@ func (h *udpHandler) Close(conn core.UDPConn) {
 }
 
 func (h *udpHandler) SetDNS(dns DNSTransport) {
-	h.dns = dns
+	h.dns.Store(dns)
+}
+
+func (h *udpHandler) getDNS() DNSTransport {
+	return h.dns.Load().(DNSTransport)
 }

@@ -33,7 +33,7 @@ func (m *ipMap) Get(hostname string) *IPSet {
 	}
 
 	s = &IPSet{}
-	// Don't hold the lock during blocking I/O.
+	// Don't hold the ipMap lock during blocking I/O.
 	s.Add(hostname)
 
 	m.Lock()
@@ -42,7 +42,7 @@ func (m *ipMap) Get(hostname string) *IPSet {
 		m.m[hostname] = s
 	} else {
 		// Another pending call to Get populated m[hostname]
-		// while we were building s.  Use the first one to ensure
+		// while we were building s.  Use that one to ensure
 		// consistency.
 		s = s2
 	}
@@ -59,28 +59,32 @@ type IPSet struct {
 	confirmed net.IP   // IP address confirmed to be working
 }
 
+// Reports whether ip is in the set.  Must be called under RLock.
+func (s *IPSet) has(ip net.IP) bool {
+	for _, oldIP := range s.ips {
+		if oldIP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// Adds an IP to the set if it is not present.  Must be called under Lock.
+func (s *IPSet) add(ip net.IP) {
+	if !s.has(ip) {
+		s.ips = append(s.ips, ip)
+	}
+}
+
 // Add one or more IP addresses to the set.
 // The hostname can be a domain name or an IP address.
 func (s *IPSet) Add(hostname string) {
 	resolved, _ := net.LookupIP(hostname)
-
 	s.Lock()
-	defer s.Unlock()
-
-	// Set union
-	has := func(ip net.IP) bool {
-		for _, oldIP := range s.ips {
-			if oldIP.Equal(ip) {
-				return true
-			}
-		}
-		return false
-	}
 	for _, ip := range resolved {
-		if !has(ip) {
-			s.ips = append(s.ips, ip)
-		}
+		s.add(ip)
 	}
+	s.Unlock()
 }
 
 // Empty reports whether the set is empty.
@@ -112,11 +116,20 @@ func (s *IPSet) Confirmed() net.IP {
 // Confirm marks ipstr as the confirmed address, if it is a valid IP address.
 func (s *IPSet) Confirm(ipstr string) {
 	ip := net.ParseIP(ipstr)
-	if ip != nil {
-		s.Lock()
-		s.confirmed = ip
-		s.Unlock()
+	if ip == nil {
+		// Ignore invalid IP address.
+		return
 	}
+	// Optimization: Skip setting if it hasn't changed.
+	if ip.Equal(s.Confirmed()) {
+		// This is the common case.
+		return
+	}
+	s.Lock()
+	// Add is O(N)
+	s.add(ip)
+	s.confirmed = ip		
+	s.Unlock()
 }
 
 // Disconfirm sets the confirmed address to nil if the current confirmed address

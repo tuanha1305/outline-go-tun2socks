@@ -194,7 +194,7 @@ func (t *transport) doQuery(q []byte) (response []byte, server string, qerr erro
 
 	// Add a trace to the request in order to expose the server's IP address.
 	// If GotConn is called, it will always be before the request completes or fails,
-	// and therefore before this function returns.
+	// and therefore before doQuery returns.
 	trace := httptrace.ClientTrace{
 		GotConn: func(info httptrace.GotConnInfo) {
 			if info.Conn == nil {
@@ -248,7 +248,7 @@ func (t *transport) Query(q []byte) ([]byte, error) {
 		latency := after.Sub(before)
 		status := Complete
 		var qerr *queryError
-		if errors.As(err, &qerr) && qerr != nil {
+		if errors.As(err, &qerr) {
 			status = qerr.status
 		}
 		t.listener.OnDNSTransaction(&DNSSummary{
@@ -294,7 +294,8 @@ func forwardQuery(t DNSTransport, q []byte, c io.Writer) error {
 // Perform a query using the transport, send the response to the writer,
 // and close the writer if there was an error.
 func forwardQueryAndCheck(t DNSTransport, q []byte, c io.WriteCloser) {
-	if forwardQuery(t, q, c) != nil {
+	if err := forwardQuery(t, q, c); err != nil {
+		fmt.Printf("Query forwarding failed: %v\n", err)
 		c.Close()
 	}
 }
@@ -302,15 +303,21 @@ func forwardQueryAndCheck(t DNSTransport, q []byte, c io.WriteCloser) {
 // Accept a DNS-over-TCP socket from a stub resolver, and connect the socket
 // to this DNSTransport.
 func Accept(t DNSTransport, c io.ReadWriteCloser) {
-	defer c.Close()
 	qlbuf := make([]byte, 2)
 	for n, err := c.Read(qlbuf); err == nil && n == 2; n, err = c.Read(qlbuf) {
 		qlen := binary.BigEndian.Uint16(qlbuf)
 		q := make([]byte, qlen)
 		n, err = c.Read(q)
-		if uint16(n) != qlen || err != nil {
-			return
+		if err != nil {
+			fmt.Printf("Error reading query: %v\n", err)
+			break
+		}
+		if n != int(qlen) {
+			fmt.Printf("Incomplete query: %d < %d\n", n, qlen)
+			break
 		}
 		go forwardQueryAndCheck(t, q, c)
 	}
+	// TODO: Cancel outstanding queries at this point.
+	c.Close()
 }

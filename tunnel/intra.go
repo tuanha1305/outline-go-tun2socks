@@ -34,10 +34,11 @@ type IntraListener interface {
 // IntraTunnel represents an Intra session.
 type IntraTunnel interface {
 	Tunnel
-	// Get and set the DNSTransport (default: nil).  If the DNSTransport is non-nil,
-	// the tunnel will send DNS queries to this transport instead of forwarding them to
-	// `udpdns`/`tcpdns`.  The transport can be changed at any time during operation.
+	// Get the DNSTransport (default: nil).
 	GetDNS() intra.DNSTransport
+	// Set the DNSTransport.  Once set, the tunnel will send DNS queries to
+	// this transport instead of forwarding them to `udpdns`/`tcpdns`.  The
+	// transport can be changed at any time during operation, but must not be nil.
 	SetDNS(intra.DNSTransport)
 }
 
@@ -61,14 +62,13 @@ func NewIntraTunnel(fakedns, udpdns, tcpdns string, tunWriter io.WriteCloser, al
 	}
 	core.RegisterOutputFn(tunWriter.Write)
 	base := &tunnel{tunWriter, core.NewLWIPStack(), true}
-	s := &intratunnel{
+	t := &intratunnel{
 		tunnel: base,
 	}
-	err := s.registerConnectionHandlers(fakedns, udpdns, tcpdns, alwaysSplitHTTPS, listener)
-	if err != nil {
+	if err := t.registerConnectionHandlers(fakedns, udpdns, tcpdns, alwaysSplitHTTPS, listener); err != nil {
 		return nil, err
 	}
-	return s, nil
+	return t, nil
 }
 
 // Registers Intra's custom UDP and TCP connection handlers to the tun2socks core.

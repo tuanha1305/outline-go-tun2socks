@@ -139,6 +139,7 @@ func TestRequest(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	// The first two bytes are the ID, so they should be set to zero.
 	if !bytes.Equal([]byte{0, 0, 3, 4, 5}, reqBody) {
 		t.Errorf("Unexpected request body %v", reqBody)
 	}
@@ -159,6 +160,7 @@ func TestResponse(t *testing.T) {
 	rt := makeTestRoundTripper()
 	transport.client.Transport = rt
 
+	// Fake server.
 	go func() {
 		<-rt.req
 		r, w := io.Pipe()
@@ -167,6 +169,7 @@ func TestResponse(t *testing.T) {
 			Body:       r,
 			Request:    &http.Request{URL: parsedURL},
 		}
+		// The DOH response should have a zero query ID.
 		w.Write([]byte{0, 0, 8, 9, 10})
 		w.Close()
 	}()
@@ -175,6 +178,7 @@ func TestResponse(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	// Query() should reconstitute the query ID in the response.
 	if !bytes.Equal([]byte{1, 2, 8, 9, 10}, resp) {
 		t.Errorf("Unexpected response %v", resp)
 	}
@@ -188,6 +192,7 @@ func TestEmptyResponse(t *testing.T) {
 	rt := makeTestRoundTripper()
 	transport.client.Transport = rt
 
+	// Fake server.
 	go func() {
 		<-rt.req
 		// Make an empty body.
@@ -257,6 +262,8 @@ func TestSendFailed(t *testing.T) {
 		t.Errorf("Wrong error type: %v", err)
 	} else if qerr.status != SendFailed {
 		t.Errorf("Wrong error status: %d", qerr.status)
+	} else if !errors.Is(qerr, rt.err) {
+		t.Errorf("Underlying error is not retained")
 	}
 }
 
@@ -426,7 +433,7 @@ func TestAccept(t *testing.T) {
 	}
 
 	// Send fake response
-	responseData := []byte{5, 4, 3, 2, 1}
+	responseData := []byte{1, 2, 8, 9, 10}
 	doh.response <- responseData
 
 	// Get Response
@@ -508,7 +515,7 @@ func TestAcceptClose(t *testing.T) {
 	client.Close()
 
 	// Send fake response too late.
-	responseData := []byte{5, 4, 3, 2, 1}
+	responseData := []byte{1, 2, 8, 9, 10}
 	doh.response <- responseData
 }
 
